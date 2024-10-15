@@ -91,7 +91,11 @@
  top: 1rem;
  right: 1.5rem;
 }
-
+@media (max-width: 639px) { /* Tailwind's sm breakpoint is 640px */
+  .transform-w {
+    zoom: 0.8; /* Escala al 80% del tamaño original */
+  }
+}
 
 @media screen and (max-width: 1150px) {
   

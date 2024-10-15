@@ -9,7 +9,7 @@ import { HiOutlineSearch, HiOutlineExclamationCircle } from "react-icons/hi";
 import { Label, TextInput, Button, Select, Modal } from "flowbite-react"; // Importamos el componente Button
 import * as XLSX from 'xlsx';
 import  Components from '../../components/Components'
-const { LoadingButton, CustomInput, CustomInputPassword, CustomRepeatPassword} = Components;
+const { LoadingButton, CustomInput, CustomInputPassword, CustomRepeatPassword,SelectInput} = Components;
 const PasswordValidationItem = ({ isValid, text }) => (
   <li className="flex items-center mb-1">
     {isValid ? <FaCheck className="text-green-500" /> : <FaTimes className="text-red-500" />}
@@ -22,7 +22,7 @@ const Docentes = () => {
   const [carreras, setCarreras] = useState([]);
   const [cuatrimestres, setCuatrimestres] = useState([]);
   const [periodo, setPeriodo] = useState('');
-  const [selectedPeriodo, setSelectedPeriodo] = useState(null);
+  const [selectedPeriodo, setSelectedDepartamento] = useState(null);
   const [selectedCarrera, setSelectedCarrera] = useState(null);
   const [selectedCuatrimestre, setSelectedCuatrimestre] = useState(null);
   const [selectedGrupo, setSelectedGrupo] = useState(null);
@@ -36,6 +36,20 @@ const Docentes = () => {
   const [activeMenu, setActiveMenu] = useState(null);
   const [isChecked, setIsChecked] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [openModalAdd, setOpenModalAdd] = useState(false);
+  const [roles, setRoles] = useState([]);
+  const [departamento, setDepartamento] = useState([]);
+  const [selectedDocente, setSelectedDocente] = useState(null);
+
+  const handleOpenDeleteModal = (docente) => {
+    setSelectedDocente(docente);
+    setOpenModalDelete(true);
+  };
+  const handleConfirmDelete = () => {
+    eliminarDocente(selectedDocente.vchMatricula);
+    setOpenModalDelete(false); // Cerrar el modal después de la eliminación
+  };
+
   const togglePasswordVisibility = () => {
     setShowPassword((prevShowPassword) => !prevShowPassword);
   };
@@ -139,30 +153,41 @@ const Docentes = () => {
     reader.onload = (e) => {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
-        // Obtener información adicional
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
-        const periodo = sheet['B2'].v;
+        const periodo = sheet['C4'].v;
         setPeriodo(periodo);
-        // Obtener datos de los alumnos
+
         const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 7 });
-        // Procesar los datos para obtener un array de objetos
+
         const alumnosData = jsonData.map((fila) => {
+          const correo = fila[4] ? fila[4].toLowerCase() : ''; // Convertir a minúsculas
+          const correoSinAcentos = correo.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // Eliminar acentos
+      
+          const nombre = fila[3] ? fila[3].toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+          const apellidoPaterno = fila[1] ? fila[1].toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+          const apellidoMaterno = fila[2] ? fila[2].toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+          const departamento = periodo ? periodo.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') : '';
+
             return {
-                MATRICULA: fila[0],
-                NOMBRE: fila[1],
-                APELLIDOMATERNO: fila[2],
-                APELLIDOPATERNO: fila[3],
-                CORREO: fila[4],
-                PASSWORD: fila[5],                
+              MATRICULA: fila[0],
+              APELLIDOPATERNO: apellidoPaterno,
+              APELLIDOMATERNO: apellidoMaterno,
+              NOMBRE: nombre,         
+              CORREO: correoSinAcentos,
+              PASSWORD: fila[5],
+              DEPARTAMENTO: departamento,
             };
-        });
+        })
+        .filter((fila) => fila.MATRICULA && fila.NOMBRE && fila.APELLIDOPATERNO && fila.APELLIDOMATERNO && fila.DEPARTAMENTO);
+
         setAlumnosUpload(alumnosData);
         console.log('Datos del archivo Excel:', alumnosData);
     };
 
     reader.readAsArrayBuffer(file);
 };
+
 
 const handleClickRegistrar = () => {
   registrarEstudiantes(alumnosUpload);
@@ -174,6 +199,8 @@ const registrarEstudiantes = async (alumnosData) =>
   {
     setIsLoading(true);
     // Hacer solicitud para obtener las carreras
+    console.log(JSON.stringify(alumnosData, null, 2));
+
     const response = await fetch('https://robe.host8b.me/WebServices/registerTeachers.php',
       {
         method: 'POST',
@@ -187,16 +214,27 @@ const registrarEstudiantes = async (alumnosData) =>
         }),
       }
     );
+    
     const result = await response.json();
 
     if (result.done) 
     {
-      setAlertMessage({ type: 'success', text: 'Datos de estudiantes registrados correctamente' });
-      console.log('Datos recibidos php:', result);
+      console.log(result.userData[0]);
+      if(result.userData[0] == "Error al insertar al Docente (Usuario ya existente):")
+      {
+        setOpenModalAdd(false)
+        setAlertMessage({ type: 'success', text: 'Docente ya registrado' });
+        return
+
+      }
+      
+    
+      setAlertMessage({ type: 'success', text: 'Datos de Docentes registrados correctamente' });
+      setOpenModalAdd(false)
     }
     else
     {                
-      setAlertMessage({ type: 'error', text: 'Error al registrar estudiantes. Inténtalo de nuevo.' });
+      setAlertMessage({ type: 'error', text: 'Error al registrar Docentes. Inténtalo de nuevo.' });
       console.log('Datos recibidos php:', result);
     }
   } 
@@ -210,18 +248,22 @@ const registrarEstudiantes = async (alumnosData) =>
     setIsLoading(false);
     setOpenModal(false)
     setFile(null);
+   
   }
 };
   useEffect(() => {
     {
-      cargarPeriodos()
+      
+      cargarDepartamentos()
     }
   }, []);
 
   useEffect(() => {
     const loadData = async () => {
-      if (selectedPeriodo) {
-        await cargarCarreras(selectedPeriodo);
+      if (selectedPeriodo ) {
+        console.log(selectedPeriodo)
+        await cargarDocentesSelec(selectedPeriodo);
+
       }
       if (selectedCarrera) {
         await cargarCuatrimestres(selectedCarrera);
@@ -237,32 +279,35 @@ const registrarEstudiantes = async (alumnosData) =>
     loadData();
   }, [selectedPeriodo, selectedCarrera, selectedCuatrimestre, selectedGrupo]);
   
-  const cargarPeriodos = async () => 
-  {
-    try
+  
+  ///cargar departamentos
+  const cargarDepartamentos = async () => 
     {
-      const response = await fetch('https://robe.host8b.me/WebServices/obtener-periodos.php');
-      const result = await response.json();
-
-      if (!result.done) 
+      try
       {
-        throw new Error('Error al obtener las carreras');
+        const response = await fetch('https://robe.host8b.me/WebServices/seeDepartamento.php');
+        const result = await response.json();
+  
+        if (!result.done) 
+        {
+          throw new Error('Error al obtener las carreras');
+        }
+        console.log("hola");
+        console.log(result);
+        setDepartamento(result.message);
       }
-      console.log(result);
-      setPeriodos(result.message);
+      catch(error)
+      {
+        console.error(error);
+      } 
     }
-    catch(error)
-    {
-      console.error(error);
-    } 
-  }
     // Función para cargar las carreras
-    const cargarCarreras = async (periodo) => 
+    const cargarDocentesSelec = async (periodo) => 
     {
       try 
       {
         // Hacer solicitud para obtener las carreras
-        const response = await fetch('https://robe.host8b.me/WebServices/obtenerCarreras.php',
+        const response = await fetch('https://robe.host8b.me/WebServices/oneDocente.php',
         {
           method: 'POST',
           headers: 
@@ -273,19 +318,24 @@ const registrarEstudiantes = async (alumnosData) =>
               periodo: periodo,
           }),
         });
+      
         const result = await response.json();
         console.log(result);
+        
         if(result.done)
         {
-          // Actualizar el estado de las carreras con los datos recibidos
-          setCarreras(result.message);
+          setAlertMessage(false)
+          setDocentes(result.message);
         }
         else{
-          setCarreras([]);
+          setAlertMessage({ type: 'error', text: 'No hay Docentes con el departamento seleccionado' });
+          setDocentes([]);
+          
         }
       } 
       catch (error) 
       {
+        console.log("mal");
         console.error(error);
       }
     };
@@ -407,13 +457,90 @@ const registrarEstudiantes = async (alumnosData) =>
     // Aquí puedes enviar el archivo a tu servidor para su procesamiento
   };
 
+
+  ///// aqui le movi para insertar docente independiente
+  
+  const handleAddDocente = () => {
+    const newDocente = {
+      MATRICULA: watch('matriculaDocente'),
+      NOMBRE: watch('nombre').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+      APELLIDOPATERNO: watch('apellidoP').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+      APELLIDOMATERNO: watch('apellidoM').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+      DEPARTAMENTO: selectedPeriodo,
+      CORREO: watch('correo').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), 
+      PASSWORD: watch('matriculaDocente'),
+    };
+  
+    // Crear un array con dos objetos iguales
+    const duplicatedDocentes = [newDocente];
+  
+    // Log para verificar los datos
+    console.log('Datos duplicados:', duplicatedDocentes);
+  
+    // Pasar el array al método que realiza la inserción
+    registrarEstudiantes(duplicatedDocentes);
+    
+  };
+  
+  const [isButtonDisabled, setIsButtonDisabled] = useState(true);
+
+const validateForm = () => {
+    const matricula = watch('matriculaDocente');
+    const nombre = watch('nombre');
+    const apellidoP = watch('apellidoP');
+    const apellidoM = watch('apellidoM');
+    const correo = watch('correo');
+
+    const isMatriculaValid = /^\d+$/.test(matricula); // Verificar si la matrícula son solo números
+    const areFieldsFilled = matricula && nombre && apellidoP && apellidoM && correo;
+
+    setIsButtonDisabled(!(isMatriculaValid && areFieldsFilled));
+};
+
+useEffect(() => {
+    validateForm();
+}, [watch('matriculaDocente'), watch('nombre'), watch('apellidoP'), watch('apellidoM'), watch('correo')]);
+
+
+//suspender docente
+const eliminarDocente = async (matricula) => {
+  console.log(matricula)
+  try {
+    const response = await fetch('https://robe.host8b.me/WebServices/obtenerResultados.php',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+            idPeriodo: selectedPeriodo,
+            
+          }),
+    });
+
+
+
+    if (response.ok) {
+      // Si la respuesta es exitosa, se elimina el docente del estado
+      setDocentes(prevDocentes => prevDocentes.filter(docente => docente.vchMatricula !== matricula));
+      alert('Docente eliminado correctamente');
+    } else {
+      const errorData = await response.json();
+      alert(`Hubo un problema al eliminar el docente: ${errorData.message}`);
+    }
+  } catch (error) {
+    console.error('Error eliminando el docente:', error);
+    alert('Error al eliminar el docente');
+  }
+};
+
   return (
     <section className='flex flex-col'>
-      {alertMessage && (
-        <Alert type={alertMessage.type} onClose={() => setAlertMessage(null)}>
-          {alertMessage.text}
-        </Alert>
-      )}
+       {alertMessage && (
+                <Alert type={alertMessage.type} onClose={() => setAlertMessage(null)}>
+                    {alertMessage.text}
+                </Alert>
+            )}
       <Modal className='mt-11 pt-16' size="4xl" base show={openModal} onClose={() => setOpenModal(false)}>
         <Modal.Header>Agregar Docentes</Modal.Header>
         <Modal.Body className='max-h-60'>
@@ -448,7 +575,7 @@ const registrarEstudiantes = async (alumnosData) =>
                             <Table.Cell className="whitespace-nowrap font-medium text-gray-900 dark:text-white">
                               {alumnosExcel.MATRICULA}
                             </Table.Cell>
-                            <Table.Cell>{alumnosExcel.NOMBRE} {alumnosExcel.APELLIDOMATERNO} {alumnosExcel.APELLIDOPATERNO}</Table.Cell>
+                            <Table.Cell>{alumnosExcel.NOMBRE} {alumnosExcel.APELLIDOPATERNO} {alumnosExcel.APELLIDOMATERNO}</Table.Cell>
                             <Table.Cell>{alumnosExcel.CORREO}</Table.Cell>
                             <Table.Cell>{alumnosExcel.PASSWORD}</Table.Cell>
                           </Table.Row>
@@ -480,10 +607,10 @@ const registrarEstudiantes = async (alumnosData) =>
           <div className="text-center">
             <HiOutlineExclamationCircle className="mx-auto mb-4 h-14 w-14 text-gray-400 dark:text-gray-200" />
             <h3 className="mb-5 text-lg font-normal text-gray-500 dark:text-gray-400">
-              ¿Estás seguro de que deseas eliminar a este Docente?
+              ¿Estás seguro de que deseas suspeder a este Docente?
             </h3>
             <div className="flex justify-center gap-4">
-              <Button color="failure" onClick={() => setOpenModalDelete(false)}>
+              <Button color="failure" onClick={() => {setOpenModalDelete(false);  handleConfirmDelete();}}>
                 {"Sí estoy seguro"}
               </Button>
               <Button color="gray" onClick={() => setOpenModalDelete(false)}>
@@ -655,8 +782,13 @@ const registrarEstudiantes = async (alumnosData) =>
             <IoMdAdd className="mr-2 h-5 w-5" />
             Añadir Docentes
           </Button> 
+          {/* Botón para abrir el modal de agregar docente */}
+          <Button icon={IoMdAdd} className="ml-2" onClick={() => setOpenModalAdd(true)}>
+                <IoMdAdd className="mr-2 h-5 w-5" />
+                Añadir Docente
+            </Button>
         </div>
-        {/*
+        
         <div>
           <h3 className="mb-2 text-base font-bold text-gray-900 dark:text-white">Consultar Docentes</h3>
           <div className='grid grid-cols-2 grid-rows-2 gap-4'>
@@ -666,152 +798,199 @@ const registrarEstudiantes = async (alumnosData) =>
               </div>
               <Select id="departamento" required 
                 onChange={(e) => {
-                  setSelectedPeriodo(e.target.value);
+                  setSelectedDepartamento(e.target.value);
                   // Cargar carreras al seleccionar periodo
                 }}
               >
                 <option value="1">Seleccionar Departamento </option>
-                {periodos.map((periodo) => (
-                  <option key={periodo.intIdPeriodo} value={periodo.intIdPeriodo}>
-                    {periodo.vchPeriodo}
+                {departamento.map((departamento) => (
+                  <option key={departamento.IdDepartamento} value={departamento.IdDepartamento}>
+                    {departamento.vchDepartamento}
                   </option>
                 ))}
               </Select>
             </div>
-            <div className="max-w-md">
-              <div className="mb-2 block">
-                <Label htmlFor="roles" value="Roles" />
-              </div>
-              <Select id="carrera" required   
-                onChange={(e) => {
-                  setSelectedCarrera(e.target.value);
-                  // Cargar cuatrimestres al seleccionar carrera
-                }}
-              >
-                <option value="">Seleccionar Rol</option>
-                {carreras.map((carrera) => (
-                  <option key={carrera.intClvCarrera} value={carrera.intClvCarrera}>
-                    {carrera.vchNomCarrera}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="max-w-md">
-              <div className="mb-2 block">
-                <Label htmlFor="estadoCuenta" value="Estado de Cuenta" />
-              </div>
-              <Select id="cuatrimestre" required  
-                onChange={(e) => {
-                  setSelectedCuatrimestre(e.target.value);
-                  // Cargar grupos al seleccionar cuatrimestre
-                }}
-              >
-                <option value="">Seleccionar estado de cuenta</option>
-                {cuatrimestres.map((cuatrimestre) => (
-                  <option key={cuatrimestre.intClvCuatrimestre} value={cuatrimestre.intClvCuatrimestre}>
-                    {cuatrimestre.vchNomCuatri}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            
+            
           </div>
         </div>
-        */}
-        <div className="overflow-x-auto">
-          <Table hoverable>
-            <Table.Head>
-              <Table.HeadCell className="p-4">
-                <Checkbox />
-              </Table.HeadCell>
-              <Table.HeadCell>Matricula</Table.HeadCell>
-              <Table.HeadCell>Nombre</Table.HeadCell>
-              <Table.HeadCell>Rol</Table.HeadCell>
-              <Table.HeadCell>Correo</Table.HeadCell>
-              <Table.HeadCell>Estado de cuenta</Table.HeadCell>
-              <Table.HeadCell className='px-4 py-3'>Acciones</Table.HeadCell>
-            </Table.Head>
-            <Table.Body className="divide-y">
-            {docentes.map((docentes) =>
-              (
-                <Table.Row className="bg-white dark:border-gray-700 dark:bg-gray-800">
-                  <Table.Cell className="p-4">
-                    <Checkbox />
-                  </Table.Cell>
-                  <Table.Cell className="whitespace-nowrap font-medium text-gray-900 dark:text-white">
-                    {docentes.vchMatricula}
-                  </Table.Cell>
-                  <Table.Cell>{docentes.vchNombre} {docentes.vchAPaterno} {docentes.vchAMaterno}</Table.Cell>
-                  <Table.Cell>{renderBadge(docentes.vchNombreRol)}</Table.Cell>
-                  <Table.Cell>{docentes.vchEmail}</Table.Cell>
-                  <Table.Cell> 
-                    <div className={`w-4 h-4 rounded-full ${docentes.enmEstadoCuenta=='activa' ? 'bg-green-500' : 'bg-red-500'}`}>
-                      <span className=" ml-5">
-                        {docentes.enmEstadoCuenta=='activa' ? 'Activo' : 'Bloqueda'}
-                      </span>                
+        <section className='flex flex-col'>
+            
+            {/* Modal para agregar un docente */}
+            <Modal show={openModalAdd} size="lg" onClose={() => setOpenModalAdd(false)}>
+                <Modal.Header>Agregar Docente</Modal.Header>
+                <Modal.Body>
+                    <div className="space-y-6">
+                        <form className="flex flex-col gap-4">
+                            <CustomInput
+                                label="Matrícula"
+                                name="matriculaDocente"
+                                pattern={/^\d+$/}
+                                errorMessage="Solo números y sin espacios"
+                                errors={errors}
+                                register={register}
+                                trigger={trigger}
+                                className="w-full"
+                            />
+                            <div className="flex flex-wrap gap-4">
+                                <CustomInput
+                                    label="Nombre"
+                                    name="nombre"
+                                    errors={errors}
+                                    register={register}
+                                    trigger={trigger}
+                                    className="w-full md:w-1/2"
+                                />
+                                <CustomInput
+                                    label="Apellido Paterno"
+                                    name="apellidoP"
+                                    errors={errors}
+                                    register={register}
+                                    trigger={trigger}
+                                    className="w-full md:w-1/2"
+                                />
+                                <CustomInput
+                                    label="Apellido Materno"
+                                    name="apellidoM"
+                                    errors={errors}
+                                    register={register}
+                                    trigger={trigger}
+                                    className="w-full md:w-1/2"
+                                />
+                                 <SelectInput
+                                  id="IdDepartamento" 
+                                  labelSelect="Seleccionar Departamento" 
+                                  label="Departamento"
+                                  name="vchDepartamento"
+                                  option="" 
+                                  options={departamento}
+                                  errorMessage="No cumples con el patron de contraseña"
+                                  errors={errors}
+                                  register={register}
+                                  trigger={trigger}
+                                  onChange={(e) => {
+                                    setSelectedDepartamento(e.target.value);
+                                  // Cargar carreras al seleccionar periodo
+                                  }}
+                                  
+                                  />
+                            </div>
+                            <CustomInput
+                                label="Correo"
+                                name="correo"
+                                errors={errors}
+                                register={register}
+                                trigger={trigger}
+                                className="w-full"
+                            />
+                            
+                        </form>
                     </div>
-                  </Table.Cell>
-                  <Table.Cell className="px-4 py-3 flex items-center justify-end">
-                  <Tooltip content="Acciones" placement="left">
-                      <button
-                        onClick={() => toggleActionsMenu(docentes.vchMatricula)} // Pasar la matrícula como parámetro
-                        className="inline-flex items-center text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 p-1.5 dark:hover-bg-gray-800 text-center text-gray-500 hover:text-gray-800 rounded-lg focus:outline-none dark:text-gray-400 dark:hover:text-gray-100"
-                        type="button"
-                      >
-                        <svg
-                          className="w-5 h-5"
-                          aria-hidden="true"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z" />
-                        </svg>
-                      </button>
-                    </Tooltip>
+                </Modal.Body>
+                <Modal.Footer className="flex justify-between">
+                    <LoadingButton
+                            className="w-full md:w-auto"
+                            onClick={handleAddDocente}
+                            isLoading={isLoading}
+                            loadingLabel="Cargando..."
+                            normalLabel="Agregar"
+                            disabled={isButtonDisabled} // Deshabilita el botón si `isButtonDisabled` es `true`
+                    />
+                    <Button color="gray" onClick={() => setOpenModalAdd(false)} className="w-full md:w-auto">
+                        Cancelar
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+        </section>
+        
+        <div className="overflow-x-auto">
+        <Table hoverable>
+  <Table.Head>
+    <Table.HeadCell className="p-4">
+      <Checkbox />
+    </Table.HeadCell>
+    <Table.HeadCell>Matricula</Table.HeadCell>
+    <Table.HeadCell>Nombre</Table.HeadCell>
+    <Table.HeadCell>Rol</Table.HeadCell>
+    <Table.HeadCell>Correo</Table.HeadCell>
+    <Table.HeadCell>Estado de cuenta</Table.HeadCell>
+    <Table.HeadCell className="px-4 py-3">Acciones</Table.HeadCell>
+  </Table.Head>
+  <Table.Body className="divide-y">
+    {docentes.map((docente) => (
+      <Table.Row key={docente.vchMatricula} className="bg-white dark:border-gray-700 dark:bg-gray-800">
+        <Table.Cell className="p-4">
+          <Checkbox value={docente.vchMatricula} />
+        </Table.Cell>
+        <Table.Cell className="whitespace-nowrap font-medium text-gray-900 dark:text-white">
+          {docente.vchMatricula}
+        </Table.Cell>
+        <Table.Cell>{docente.vchNombre} {docente.vchAPaterno} {docente.vchAMaterno}</Table.Cell>
+        <Table.Cell>{renderBadge(docente.vchNombreRol)}</Table.Cell>
+        <Table.Cell>{docente.vchEmail}</Table.Cell>
+        <Table.Cell>
+          <div className={`w-4 h-4 rounded-full ${docente.enmEstadoCuenta === 'activa' ? 'bg-green-500' : 'bg-red-500'}`}>
+            <span className="ml-5">
+              {docente.enmEstadoCuenta === 'activa' ? 'Activo' : 'Bloqueada'}
+            </span>
+          </div>
+        </Table.Cell>
+        <Table.Cell className="px-4 py-3 flex items-center justify-end">
+          <Tooltip content="Acciones" placement="left">
+            <button
+              onClick={() => toggleActionsMenu(docente.vchMatricula)} 
+              className="inline-flex items-center text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 p-1.5 text-center text-gray-500 hover:text-gray-800 rounded-lg focus:outline-none dark:text-gray-400 dark:hover:text-gray-100"
+              type="button"
+            >
+              <svg
+                className="w-5 h-5"
+                aria-hidden="true"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z" />
+              </svg>
+            </button>
+          </Tooltip>
 
-                    {activeMenu === docentes.vchMatricula && (
-                      <div class="mr-12	absolute z-10 w-32 bg-white rounded divide-y divide-gray-100 shadow dark:bg-gray-700 dark:divide-gray-600">
-                      <ul class="py-1 text-sm" aria-labelledby="apple-imac-27-dropdown-button">
-                          <li>
-                              <button type="button" data-modal-target="updateProductModal" data-modal-toggle="updateProductModal" class="flex w-full items-center py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white text-gray-700 dark:text-gray-200"
-                                onClick={() => setOpenModalEdit(true)}
+          {activeMenu === docente.vchMatricula && (
+            <div className="mr-12 absolute z-10 w-32 bg-white rounded divide-y divide-gray-100 shadow dark:bg-gray-700 dark:divide-gray-600">
+              <ul className="py-1 text-sm" aria-labelledby="apple-imac-27-dropdown-button">
+                <li>
+                  <button type="button" data-modal-target="updateProductModal" data-modal-toggle="updateProductModal" className="flex w-full items-center py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white text-gray-700 dark:text-gray-200"
+                    onClick={() => setOpenModalEdit(true)}
+                  >
+                    <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+                      <path fillRule="evenodd" clipRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                    </svg>
+                    Editar
+                  </button>
+                </li>
 
-                              >
-                                  <svg class="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewbox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                      <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
-                                      <path fill-rule="evenodd" clip-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-                                  </svg>
-                                  Editar
-                              </button>
-                          </li>
-                          <li>
-                              <button type="button" data-modal-target="readProductModal" data-modal-toggle="readProductModal" class="flex w-full items-center py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white text-gray-700 dark:text-gray-200">
-                                  <svg class="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewbox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                      <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-                                      <path fill-rule="evenodd" clip-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" />
-                                  </svg>
-                                  Detalles
-                              </button>
-                          </li>
-                          <li>
-                              <button type="button" data-modal-target="deleteModal" data-modal-toggle="deleteModal" class="flex w-full items-center py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 text-red-500 dark:hover:text-red-400"
-                                onClick={() => setOpenModalDelete(true)}
-                              >
-                                  <svg class="w-4 h-4 mr-2" viewbox="0 0 14 15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                      <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="M6.09922 0.300781C5.93212 0.30087 5.76835 0.347476 5.62625 0.435378C5.48414 0.523281 5.36931 0.649009 5.29462 0.798481L4.64302 2.10078H1.59922C1.36052 2.10078 1.13161 2.1956 0.962823 2.36439C0.79404 2.53317 0.699219 2.76209 0.699219 3.00078C0.699219 3.23948 0.79404 3.46839 0.962823 3.63718C1.13161 3.80596 1.36052 3.90078 1.59922 3.90078V12.9008C1.59922 13.3782 1.78886 13.836 2.12643 14.1736C2.46399 14.5111 2.92183 14.7008 3.39922 14.7008H10.5992C11.0766 14.7008 11.5344 14.5111 11.872 14.1736C12.2096 13.836 12.3992 13.3782 12.3992 12.9008V3.90078C12.6379 3.90078 12.8668 3.80596 13.0356 3.63718C13.2044 3.46839 13.2992 3.23948 13.2992 3.00078C13.2992 2.76209 13.2044 2.53317 13.0356 2.36439C12.8668 2.1956 12.6379 2.10078 12.3992 2.10078H9.35542L8.70382 0.798481C8.62913 0.649009 8.5143 0.523281 8.37219 0.435378C8.23009 0.347476 8.06631 0.30087 7.89922 0.300781H6.09922ZM4.29922 5.70078C4.29922 5.46209 4.39404 5.23317 4.56282 5.06439C4.73161 4.8956 4.96052 4.80078 5.19922 4.80078C5.43791 4.80078 5.66683 4.8956 5.83561 5.06439C6.0044 5.23317 6.09922 5.46209 6.09922 5.70078V11.1008C6.09922 11.3395 6.0044 11.5684 5.83561 11.7372C5.66683 11.906 5.43791 12.0008 5.19922 12.0008C4.96052 12.0008 4.73161 11.906 4.56282 11.7372C4.39404 11.5684 4.29922 11.3395 4.29922 11.1008V5.70078ZM8.79922 4.80078C8.56052 4.80078 8.33161 4.8956 8.16282 5.06439C7.99404 5.23317 7.89922 5.46209 7.89922 5.70078V11.1008C7.89922 11.3395 7.99404 11.5684 8.16282 11.7372C8.33161 11.906 8.56052 12.0008 8.79922 12.0008C9.03791 12.0008 9.26683 11.906 9.43561 11.7372C9.6044 11.5684 9.69922 11.3395 9.69922 11.1008V5.70078C9.69922 5.46209 9.6044 5.23317 9.43561 5.06439C9.26683 4.8956 9.03791 4.80078 8.79922 4.80078Z" />
-                                  </svg>
-                                  Eliminar
-                              </button>
-                          </li>
-                      </ul>
-                      </div>
-                    )}
-                  </Table.Cell>
-                </Table.Row>
-              ))
-            }
-            </Table.Body>
-          </Table>
+                <li>
+                <button 
+                  type="button" 
+                  className="flex w-full items-center py-2 px-4 hover:bg-gray-100 dark:hover:bg-gray-600 text-red-500 dark:hover:text-red-400"
+                  onClick={() => handleOpenDeleteModal(docente)}  // Abrir modal de confirmación
+                >
+                  <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path fillRule="evenodd" clipRule="evenodd" fill="currentColor" d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 18.66 18.24 16.44 19.77L4.23 7.56C5.76 5.34 8.69 4 12 4Z" />
+                    <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                  Suspender
+                </button>
+              </li>
+              </ul>
+            </div>
+          )}
+        </Table.Cell>
+      </Table.Row>
+    ))}
+  </Table.Body>
+</Table>
+
         </div>
       </div>
     </section>
